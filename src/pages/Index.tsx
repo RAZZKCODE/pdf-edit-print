@@ -8,7 +8,8 @@ import {
   Zap, 
   Eye,
   ArrowRight,
-  FileText
+  FileText,
+  Download
 } from "lucide-react";
 import Header from "@/components/Header";
 import FileUpload from "@/components/FileUpload";
@@ -16,13 +17,6 @@ import PDFViewer from "@/components/PDFViewer";
 import PrintPreview from "@/components/PrintPreview";
 import FeatureCard from "@/components/FeatureCard";
 import { Button } from "@/components/ui/button";
-
-interface CropArea {
-  x: number;
-  y: number;
-  width: number;
-  height: number;
-}
 
 const Index = () => {
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
@@ -42,34 +36,30 @@ const Index = () => {
     }, 1500);
   }, []);
 
-  const handlePrint = useCallback((cropArea: CropArea | null, pageNumber: number) => {
+  const handlePrint = useCallback((imageData: string | null, pageNumber: number) => {
     // For full page print without crop, trigger native print
-    if (!cropArea || cropArea.width < 10 || cropArea.height < 10) {
+    if (!imageData) {
       window.print();
       return;
     }
 
-    // For cropped selection, we'd extract the region
-    // This is a placeholder - in production, you'd use canvas to extract the region
-    const canvas = document.createElement("canvas");
-    canvas.width = cropArea.width;
-    canvas.height = cropArea.height;
-    const ctx = canvas.getContext("2d");
-    
-    if (ctx) {
-      // In a real implementation, you'd capture the actual PDF region
-      ctx.fillStyle = "#f5f5f5";
-      ctx.fillRect(0, 0, cropArea.width, cropArea.height);
-      ctx.fillStyle = "#333";
-      ctx.font = "16px Inter";
-      ctx.textAlign = "center";
-      ctx.fillText(`Selected region from page ${pageNumber}`, cropArea.width / 2, cropArea.height / 2);
-      ctx.fillText(`${Math.round(cropArea.width)} × ${Math.round(cropArea.height)} px`, cropArea.width / 2, cropArea.height / 2 + 24);
-    }
-    
-    setPreviewImage(canvas.toDataURL("image/png"));
+    // Show print preview with cropped image
+    setPreviewImage(imageData);
     setShowPreview(true);
   }, []);
+
+  const handleDownloadFull = useCallback(() => {
+    if (!selectedFile) return;
+    
+    const url = URL.createObjectURL(selectedFile);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = selectedFile.name;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+  }, [selectedFile]);
 
   const features = [
     {
@@ -87,6 +77,11 @@ const Index = () => {
       title: "Direct Printing",
       description: "Print your cropped selection or full pages directly to any connected printer with one click.",
     },
+    {
+      icon: Download,
+      title: "Download Options",
+      description: "Download full PDF or cropped selections in high resolution PNG format.",
+    },
   ];
 
   const benefits = [
@@ -100,7 +95,7 @@ const Index = () => {
       <Header />
       
       {/* Hero Section */}
-      <section className="relative gradient-hero overflow-hidden">
+      <section className="relative overflow-hidden">
         <div className="absolute inset-0 overflow-hidden">
           <div className="absolute -top-1/2 -right-1/4 w-96 h-96 bg-accent/10 rounded-full blur-3xl" />
           <div className="absolute -bottom-1/2 -left-1/4 w-96 h-96 bg-primary/10 rounded-full blur-3xl" />
@@ -162,7 +157,11 @@ const Index = () => {
       <AnimatePresence>
         {selectedFile && (
           <section ref={workspaceRef} className="container mx-auto px-4 py-12">
-            <PDFViewer file={selectedFile} onPrint={handlePrint} />
+            <PDFViewer 
+              file={selectedFile} 
+              onPrint={handlePrint} 
+              onDownloadFull={handleDownloadFull}
+            />
           </section>
         )}
       </AnimatePresence>
@@ -179,11 +178,11 @@ const Index = () => {
             How It Works
           </h2>
           <p className="text-muted-foreground max-w-xl mx-auto">
-            Three simple steps to unlock, crop, and print your PDFs with precision
+            Simple steps to unlock, crop, and print your PDFs with precision
           </p>
         </motion.div>
 
-        <div className="grid md:grid-cols-3 gap-6 max-w-4xl mx-auto">
+        <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-6 max-w-5xl mx-auto">
           {features.map((feature, index) => (
             <FeatureCard
               key={index}
@@ -205,7 +204,6 @@ const Index = () => {
           viewport={{ once: true }}
           className="relative bg-card rounded-3xl border border-border p-12 text-center overflow-hidden"
         >
-          <div className="absolute inset-0 gradient-primary opacity-5" />
           <div className="relative z-10">
             <h2 className="font-display text-3xl md:text-4xl font-bold text-foreground mb-4">
               Ready to Get Started?
@@ -214,8 +212,8 @@ const Index = () => {
               Upload your first PDF and experience the easiest way to unlock, crop, and print documents.
             </p>
             <Button 
-              variant="accent" 
-              size="xl" 
+              variant="default" 
+              size="lg" 
               className="gap-2"
               onClick={() => window.scrollTo({ top: 0, behavior: "smooth" })}
             >
