@@ -9,7 +9,9 @@ import {
   Crop, 
   Printer,
   RotateCcw,
-  Maximize2
+  Maximize2,
+  Download,
+  X
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import "react-pdf/dist/Page/AnnotationLayer.css";
@@ -27,10 +29,11 @@ interface CropArea {
 
 interface PDFViewerProps {
   file: File;
-  onPrint: (cropArea: CropArea | null, pageNumber: number) => void;
+  onPrint: (imageData: string | null, pageNumber: number) => void;
+  onDownloadFull: () => void;
 }
 
-const PDFViewer = ({ file, onPrint }: PDFViewerProps) => {
+const PDFViewer = ({ file, onPrint, onDownloadFull }: PDFViewerProps) => {
   const [numPages, setNumPages] = useState<number>(0);
   const [currentPage, setCurrentPage] = useState(1);
   const [scale, setScale] = useState(1);
@@ -41,6 +44,7 @@ const PDFViewer = ({ file, onPrint }: PDFViewerProps) => {
   
   const containerRef = useRef<HTMLDivElement>(null);
   const pageRef = useRef<HTMLDivElement>(null);
+  const canvasRef = useRef<HTMLCanvasElement | null>(null);
 
   const onDocumentLoadSuccess = ({ numPages }: { numPages: number }) => {
     setNumPages(numPages);
@@ -63,6 +67,21 @@ const PDFViewer = ({ file, onPrint }: PDFViewerProps) => {
   const zoomIn = () => setScale(prev => Math.min(prev + 0.25, 3));
   const zoomOut = () => setScale(prev => Math.max(prev - 0.25, 0.5));
   const resetZoom = () => setScale(1);
+
+  // Store canvas reference when PDF page renders
+  useEffect(() => {
+    const checkForCanvas = () => {
+      if (pageRef.current) {
+        const canvas = pageRef.current.querySelector('canvas');
+        if (canvas) {
+          canvasRef.current = canvas;
+        }
+      }
+    };
+    
+    const timer = setTimeout(checkForCanvas, 500);
+    return () => clearTimeout(timer);
+  }, [currentPage, scale, file]);
 
   const handleMouseDown = useCallback((e: React.MouseEvent) => {
     if (!isCropMode || !pageRef.current) return;
@@ -100,8 +119,73 @@ const PDFViewer = ({ file, onPrint }: PDFViewerProps) => {
     setIsCropMode(false);
   };
 
+  const extractCroppedImage = useCallback((): string | null => {
+    if (!cropArea || !canvasRef.current || !pageRef.current) return null;
+
+    const sourceCanvas = canvasRef.current;
+    const pageRect = pageRef.current.getBoundingClientRect();
+    const canvasRect = sourceCanvas.getBoundingClientRect();
+
+    // Calculate the offset of the canvas within the page container
+    const offsetX = canvasRect.left - pageRect.left;
+    const offsetY = canvasRect.top - pageRect.top;
+
+    // Adjust crop coordinates relative to the canvas
+    const adjustedX = cropArea.x - offsetX;
+    const adjustedY = cropArea.y - offsetY;
+
+    // Calculate the scale factor between displayed size and actual canvas size
+    const scaleX = sourceCanvas.width / canvasRect.width;
+    const scaleY = sourceCanvas.height / canvasRect.height;
+
+    // Apply scale to get actual pixel coordinates
+    const sourceX = Math.max(0, adjustedX * scaleX);
+    const sourceY = Math.max(0, adjustedY * scaleY);
+    const sourceWidth = Math.min(cropArea.width * scaleX, sourceCanvas.width - sourceX);
+    const sourceHeight = Math.min(cropArea.height * scaleY, sourceCanvas.height - sourceY);
+
+    if (sourceWidth <= 0 || sourceHeight <= 0) return null;
+
+    // Create a new canvas for the cropped image at full resolution
+    const croppedCanvas = document.createElement('canvas');
+    croppedCanvas.width = sourceWidth;
+    croppedCanvas.height = sourceHeight;
+    const ctx = croppedCanvas.getContext('2d');
+    
+    if (!ctx) return null;
+
+    // Draw the cropped portion at full resolution
+    ctx.drawImage(
+      sourceCanvas,
+      sourceX, sourceY, sourceWidth, sourceHeight,
+      0, 0, sourceWidth, sourceHeight
+    );
+
+    return croppedCanvas.toDataURL('image/png', 1.0);
+  }, [cropArea]);
+
   const handlePrint = () => {
-    onPrint(cropArea, currentPage);
+    if (cropArea && cropArea.width > 10 && cropArea.height > 10) {
+      const imageData = extractCroppedImage();
+      onPrint(imageData, currentPage);
+    } else {
+      // Print full page
+      onPrint(null, currentPage);
+    }
+  };
+
+  const handleDownloadCropped = () => {
+    if (!cropArea || cropArea.width <= 10 || cropArea.height <= 10) return;
+    
+    const imageData = extractCroppedImage();
+    if (imageData) {
+      const link = document.createElement('a');
+      link.href = imageData;
+      link.download = `cropped-page-${currentPage}.png`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+    }
   };
 
   return (
@@ -111,7 +195,7 @@ const PDFViewer = ({ file, onPrint }: PDFViewerProps) => {
       className="bg-card rounded-2xl border border-border shadow-lg overflow-hidden"
     >
       {/* Toolbar */}
-      <div className="flex items-center justify-between px-4 py-3 border-b border-border bg-muted/30">
+      <div className="flex items-center justify-between flex-wrap gap-3 px-4 py-3 border-b border-border bg-muted/30">
         <div className="flex items-center gap-2">
           <Button
             variant="ghost"
@@ -149,31 +233,51 @@ const PDFViewer = ({ file, onPrint }: PDFViewerProps) => {
           </Button>
         </div>
 
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 flex-wrap">
           <Button
-            variant={isCropMode ? "accent" : "secondary"}
+            variant={isCropMode ? "default" : "secondary"}
             size="sm"
             onClick={() => setIsCropMode(!isCropMode)}
             className="gap-2"
           >
             <Crop className="w-4 h-4" />
-            {isCropMode ? "Cropping" : "Crop Mode"}
+            {isCropMode ? "Cropping" : "Crop"}
           </Button>
           
           {cropArea && cropArea.width > 10 && cropArea.height > 10 && (
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={clearCrop}
-              className="gap-2"
-            >
-              <RotateCcw className="w-4 h-4" />
-              Clear
-            </Button>
+            <>
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={clearCrop}
+                title="Clear selection"
+              >
+                <X className="w-4 h-4" />
+              </Button>
+              <Button
+                variant="secondary"
+                size="sm"
+                onClick={handleDownloadCropped}
+                className="gap-2"
+              >
+                <Download className="w-4 h-4" />
+                Cropped
+              </Button>
+            </>
           )}
 
           <Button
-            variant="hero"
+            variant="secondary"
+            size="sm"
+            onClick={onDownloadFull}
+            className="gap-2"
+          >
+            <Download className="w-4 h-4" />
+            Full PDF
+          </Button>
+
+          <Button
+            variant="default"
             size="sm"
             onClick={handlePrint}
             className="gap-2"
@@ -253,6 +357,13 @@ const PDFViewer = ({ file, onPrint }: PDFViewerProps) => {
                   </div>
                 </div>
               </>
+            )}
+
+            {/* Crop Mode Indicator */}
+            {isCropMode && !cropArea && (
+              <div className="absolute top-4 left-1/2 -translate-x-1/2 bg-accent text-accent-foreground px-4 py-2 rounded-full text-sm font-medium shadow-lg">
+                Click and drag to select area
+              </div>
             )}
           </div>
         </div>
