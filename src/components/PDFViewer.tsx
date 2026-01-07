@@ -208,9 +208,60 @@ const PDFViewer = ({ file, onPrint, onDownloadFull }: PDFViewerProps) => {
     
     const imageData = extractCroppedImage();
     if (imageData) {
+      // Convert PNG to JPEG for better quality download
+      const img = new Image();
+      img.onload = () => {
+        const canvas = document.createElement('canvas');
+        canvas.width = img.width;
+        canvas.height = img.height;
+        const ctx = canvas.getContext('2d');
+        if (ctx) {
+          ctx.fillStyle = '#FFFFFF';
+          ctx.fillRect(0, 0, canvas.width, canvas.height);
+          ctx.drawImage(img, 0, 0);
+          const jpegData = canvas.toDataURL('image/jpeg', 1.0);
+          const link = document.createElement('a');
+          link.href = jpegData;
+          link.download = `cropped-page-${currentPage}.jpg`;
+          document.body.appendChild(link);
+          link.click();
+          document.body.removeChild(link);
+        }
+      };
+      img.src = imageData;
+    }
+  };
+
+  const handleDownloadFullImage = () => {
+    if (!canvasRef.current) {
+      // Try to get canvas again
+      if (pageRef.current) {
+        const canvas = pageRef.current.querySelector('canvas');
+        if (canvas) {
+          canvasRef.current = canvas;
+        }
+      }
+    }
+    
+    if (!canvasRef.current) return;
+    
+    const sourceCanvas = canvasRef.current;
+    
+    // Create a new canvas for JPEG conversion with white background
+    const jpegCanvas = document.createElement('canvas');
+    jpegCanvas.width = sourceCanvas.width;
+    jpegCanvas.height = sourceCanvas.height;
+    const ctx = jpegCanvas.getContext('2d');
+    
+    if (ctx) {
+      ctx.fillStyle = '#FFFFFF';
+      ctx.fillRect(0, 0, jpegCanvas.width, jpegCanvas.height);
+      ctx.drawImage(sourceCanvas, 0, 0);
+      
+      const jpegData = jpegCanvas.toDataURL('image/jpeg', 1.0);
       const link = document.createElement('a');
-      link.href = imageData;
-      link.download = `cropped-page-${currentPage}.png`;
+      link.href = jpegData;
+      link.download = `page-${currentPage}-full.jpg`;
       document.body.appendChild(link);
       link.click();
       document.body.removeChild(link);
@@ -298,11 +349,11 @@ const PDFViewer = ({ file, onPrint, onDownloadFull }: PDFViewerProps) => {
           <Button
             variant="secondary"
             size="sm"
-            onClick={onDownloadFull}
+            onClick={handleDownloadFullImage}
             className="gap-2"
           >
             <Download className="w-4 h-4" />
-            Full PDF
+            Full Image
           </Button>
 
           <Button
