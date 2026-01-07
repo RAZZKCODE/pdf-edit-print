@@ -42,35 +42,32 @@ const PDFViewer = ({ file, onPrint, onDownloadFull }: PDFViewerProps) => {
   const [isDrawing, setIsDrawing] = useState(false);
   const [startPos, setStartPos] = useState({ x: 0, y: 0 });
   const [showPasswordModal, setShowPasswordModal] = useState(false);
-  const [password, setPassword] = useState<string | undefined>(undefined);
   const [passwordError, setPasswordError] = useState<string>("");
+  const [pdfKey, setPdfKey] = useState(0);
   
   const containerRef = useRef<HTMLDivElement>(null);
   const pageRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const passwordCallbackRef = useRef<((password: string) => void) | null>(null);
 
   const onDocumentLoadSuccess = ({ numPages }: { numPages: number }) => {
     setNumPages(numPages);
     setShowPasswordModal(false);
     setPasswordError("");
-  };
-
-  const onDocumentLoadError = (error: Error) => {
-    // Check if it's a password error
-    if (error.message.includes("password")) {
-      setShowPasswordModal(true);
-    }
+    passwordCallbackRef.current = null;
   };
 
   const handlePasswordSubmit = (enteredPassword: string) => {
-    setPassword(enteredPassword);
-    setPasswordError("");
+    if (passwordCallbackRef.current) {
+      passwordCallbackRef.current(enteredPassword);
+      setShowPasswordModal(false);
+    }
   };
 
   const handlePasswordCancel = () => {
     setShowPasswordModal(false);
-    setPassword(undefined);
     setPasswordError("");
+    passwordCallbackRef.current = null;
   };
 
   const onPassword = (callback: (password: string) => void, reason: number) => {
@@ -78,11 +75,8 @@ const PDFViewer = ({ file, onPrint, onDownloadFull }: PDFViewerProps) => {
     if (reason === 2) {
       setPasswordError("Incorrect password. Please try again.");
     }
+    passwordCallbackRef.current = callback;
     setShowPasswordModal(true);
-    
-    if (password) {
-      callback(password);
-    }
   };
 
   const nextPage = () => {
@@ -341,7 +335,6 @@ const PDFViewer = ({ file, onPrint, onDownloadFull }: PDFViewerProps) => {
             <Document
               file={file}
               onLoadSuccess={onDocumentLoadSuccess}
-              onLoadError={onDocumentLoadError}
               onPassword={onPassword}
               loading={
                 <div className="flex items-center justify-center h-96">
