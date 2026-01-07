@@ -8,12 +8,12 @@ import {
   ZoomOut, 
   Crop, 
   Printer,
-  RotateCcw,
   Maximize2,
   Download,
   X
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import PasswordModal from "@/components/PasswordModal";
 import "react-pdf/dist/Page/AnnotationLayer.css";
 import "react-pdf/dist/Page/TextLayer.css";
 
@@ -41,6 +41,9 @@ const PDFViewer = ({ file, onPrint, onDownloadFull }: PDFViewerProps) => {
   const [cropArea, setCropArea] = useState<CropArea | null>(null);
   const [isDrawing, setIsDrawing] = useState(false);
   const [startPos, setStartPos] = useState({ x: 0, y: 0 });
+  const [showPasswordModal, setShowPasswordModal] = useState(false);
+  const [password, setPassword] = useState<string | undefined>(undefined);
+  const [passwordError, setPasswordError] = useState<string>("");
   
   const containerRef = useRef<HTMLDivElement>(null);
   const pageRef = useRef<HTMLDivElement>(null);
@@ -48,6 +51,38 @@ const PDFViewer = ({ file, onPrint, onDownloadFull }: PDFViewerProps) => {
 
   const onDocumentLoadSuccess = ({ numPages }: { numPages: number }) => {
     setNumPages(numPages);
+    setShowPasswordModal(false);
+    setPasswordError("");
+  };
+
+  const onDocumentLoadError = (error: Error) => {
+    // Check if it's a password error
+    if (error.message.includes("password")) {
+      setShowPasswordModal(true);
+    }
+  };
+
+  const handlePasswordSubmit = (enteredPassword: string) => {
+    setPassword(enteredPassword);
+    setPasswordError("");
+  };
+
+  const handlePasswordCancel = () => {
+    setShowPasswordModal(false);
+    setPassword(undefined);
+    setPasswordError("");
+  };
+
+  const onPassword = (callback: (password: string) => void, reason: number) => {
+    // reason: 1 = need password, 2 = incorrect password
+    if (reason === 2) {
+      setPasswordError("Incorrect password. Please try again.");
+    }
+    setShowPasswordModal(true);
+    
+    if (password) {
+      callback(password);
+    }
   };
 
   const nextPage = () => {
@@ -306,6 +341,8 @@ const PDFViewer = ({ file, onPrint, onDownloadFull }: PDFViewerProps) => {
             <Document
               file={file}
               onLoadSuccess={onDocumentLoadSuccess}
+              onLoadError={onDocumentLoadError}
+              onPassword={onPassword}
               loading={
                 <div className="flex items-center justify-center h-96">
                   <div className="w-10 h-10 border-4 border-accent border-t-transparent rounded-full animate-spin" />
@@ -368,6 +405,14 @@ const PDFViewer = ({ file, onPrint, onDownloadFull }: PDFViewerProps) => {
           </div>
         </div>
       </div>
+
+      {/* Password Modal */}
+      <PasswordModal
+        isOpen={showPasswordModal}
+        onSubmit={handlePasswordSubmit}
+        onCancel={handlePasswordCancel}
+        error={passwordError}
+      />
     </motion.div>
   );
 };
