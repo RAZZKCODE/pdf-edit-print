@@ -10,7 +10,8 @@ import {
   Printer,
   Maximize2,
   Download,
-  X
+  X,
+  Loader2
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import PasswordModal from "@/components/PasswordModal";
@@ -33,6 +34,9 @@ interface PDFViewerProps {
   onDownloadFull: () => void;
 }
 
+// High resolution scale for downloads (3x for ~300 DPI)
+const DOWNLOAD_SCALE = 3;
+
 const PDFViewer = ({ file, onPrint, onDownloadFull }: PDFViewerProps) => {
   const [numPages, setNumPages] = useState<number>(0);
   const [currentPage, setCurrentPage] = useState(1);
@@ -44,17 +48,47 @@ const PDFViewer = ({ file, onPrint, onDownloadFull }: PDFViewerProps) => {
   const [showPasswordModal, setShowPasswordModal] = useState(false);
   const [passwordError, setPasswordError] = useState<string>("");
   const [pdfKey, setPdfKey] = useState(0);
+  const [isExporting, setIsExporting] = useState(false);
+  const [pdfDocument, setPdfDocument] = useState<any>(null);
   
   const containerRef = useRef<HTMLDivElement>(null);
   const pageRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const passwordCallbackRef = useRef<((password: string) => void) | null>(null);
 
-  const onDocumentLoadSuccess = ({ numPages }: { numPages: number }) => {
-    setNumPages(numPages);
+  const onDocumentLoadSuccess = (pdf: any) => {
+    setNumPages(pdf.numPages);
+    setPdfDocument(pdf);
     setShowPasswordModal(false);
     setPasswordError("");
     passwordCallbackRef.current = null;
+  };
+
+  // Render page at high resolution for download
+  const renderHighResPage = async (): Promise<HTMLCanvasElement | null> => {
+    if (!pdfDocument) return null;
+    
+    try {
+      const page = await pdfDocument.getPage(currentPage);
+      const viewport = page.getViewport({ scale: DOWNLOAD_SCALE });
+      
+      const canvas = document.createElement('canvas');
+      const context = canvas.getContext('2d');
+      if (!context) return null;
+      
+      canvas.width = viewport.width;
+      canvas.height = viewport.height;
+      
+      await page.render({
+        canvasContext: context,
+        viewport: viewport,
+      }).promise;
+      
+      return canvas;
+    } catch (error) {
+      console.error('Error rendering high-res page:', error);
+      return null;
+    }
   };
 
   const handlePasswordSubmit = (enteredPassword: string) => {
@@ -203,69 +237,114 @@ const PDFViewer = ({ file, onPrint, onDownloadFull }: PDFViewerProps) => {
     }
   };
 
-  const handleDownloadCropped = () => {
+  const handleDownloadCropped = async () => {
     if (!cropArea || cropArea.width <= 10 || cropArea.height <= 10) return;
     
-    const imageData = extractCroppedImage();
-    if (imageData) {
-      // Convert PNG to JPEG for better quality download
-      const img = new Image();
-      img.onload = () => {
-        const canvas = document.createElement('canvas');
-        canvas.width = img.width;
-        canvas.height = img.height;
-        const ctx = canvas.getContext('2d');
-        if (ctx) {
-          ctx.fillStyle = '#FFFFFF';
-          ctx.fillRect(0, 0, canvas.width, canvas.height);
-          ctx.drawImage(img, 0, 0);
-          const jpegData = canvas.toDataURL('image/jpeg', 1.0);
-          const link = document.createElement('a');
-          link.href = jpegData;
-          link.download = `cropped-page-${currentPage}.jpg`;
-          document.body.appendChild(link);
-          link.click();
-          document.body.removeChild(link);
-        }
-      };
-      img.src = imageData;
+    setIsExporting(true);
+    
+    try {
+      // Render at high resolution
+      const highResCanvas = await renderHighResPage();
+      if (!highResCanvas || !pageRef.current) {
+        setIsExporting(false);
+        return;
+      }
+      
+      const pageRect = pageRef.current.getBoundingClientRect();
+      const displayCanvas = pageRef.current.querySelector('canvas');
+      if (!displayCanvas) {
+        setIsExporting(false);
+        return;
+      }
+      
+      const displayCanvasRect = displayCanvas.getBoundingClientRect();
+      
+      // Calculate the offset of display canvas within page container
+      const offsetX = displayCanvasRect.left - pageRect.left;
+      const offsetY = displayCanvasRect.top - pageRect.top;
+      
+      // Adjust crop coordinates relative to display canvas
+      const adjustedX = cropArea.x - offsetX;
+      const adjustedY = cropArea.y - offsetY;
+      
+      // Scale from display size to high-res canvas size
+      const scaleX = highResCanvas.width / displayCanvasRect.width;
+      const scaleY = highResCanvas.height / displayCanvasRect.height;
+      
+      const sourceX = Math.max(0, adjustedX * scaleX);
+      const sourceY = Math.max(0, adjustedY * scaleY);
+      const sourceWidth = Math.min(cropArea.width * scaleX, highResCanvas.width - sourceX);
+      const sourceHeight = Math.min(cropArea.height * scaleY, highResCanvas.height - sourceY);
+      
+      if (sourceWidth <= 0 || sourceHeight <= 0) {
+        setIsExporting(false);
+        return;
+      }
+      
+      // Create cropped canvas at high resolution
+      const croppedCanvas = document.createElement('canvas');
+      croppedCanvas.width = sourceWidth;
+      croppedCanvas.height = sourceHeight;
+      const ctx = croppedCanvas.getContext('2d');
+      
+      if (ctx) {
+        ctx.fillStyle = '#FFFFFF';
+        ctx.fillRect(0, 0, croppedCanvas.width, croppedCanvas.height);
+        ctx.drawImage(
+          highResCanvas,
+          sourceX, sourceY, sourceWidth, sourceHeight,
+          0, 0, sourceWidth, sourceHeight
+        );
+        
+        const jpegData = croppedCanvas.toDataURL('image/jpeg', 0.95);
+        const link = document.createElement('a');
+        link.href = jpegData;
+        link.download = `cropped-page-${currentPage}-hd.jpg`;
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+      }
+    } catch (error) {
+      console.error('Error exporting cropped image:', error);
     }
+    
+    setIsExporting(false);
   };
 
-  const handleDownloadFullImage = () => {
-    if (!canvasRef.current) {
-      // Try to get canvas again
-      if (pageRef.current) {
-        const canvas = pageRef.current.querySelector('canvas');
-        if (canvas) {
-          canvasRef.current = canvas;
-        }
+  const handleDownloadFullImage = async () => {
+    setIsExporting(true);
+    
+    try {
+      const highResCanvas = await renderHighResPage();
+      if (!highResCanvas) {
+        setIsExporting(false);
+        return;
       }
-    }
-    
-    if (!canvasRef.current) return;
-    
-    const sourceCanvas = canvasRef.current;
-    
-    // Create a new canvas for JPEG conversion with white background
-    const jpegCanvas = document.createElement('canvas');
-    jpegCanvas.width = sourceCanvas.width;
-    jpegCanvas.height = sourceCanvas.height;
-    const ctx = jpegCanvas.getContext('2d');
-    
-    if (ctx) {
-      ctx.fillStyle = '#FFFFFF';
-      ctx.fillRect(0, 0, jpegCanvas.width, jpegCanvas.height);
-      ctx.drawImage(sourceCanvas, 0, 0);
       
-      const jpegData = jpegCanvas.toDataURL('image/jpeg', 1.0);
-      const link = document.createElement('a');
-      link.href = jpegData;
-      link.download = `page-${currentPage}-full.jpg`;
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
+      // Create JPEG with white background
+      const jpegCanvas = document.createElement('canvas');
+      jpegCanvas.width = highResCanvas.width;
+      jpegCanvas.height = highResCanvas.height;
+      const ctx = jpegCanvas.getContext('2d');
+      
+      if (ctx) {
+        ctx.fillStyle = '#FFFFFF';
+        ctx.fillRect(0, 0, jpegCanvas.width, jpegCanvas.height);
+        ctx.drawImage(highResCanvas, 0, 0);
+        
+        const jpegData = jpegCanvas.toDataURL('image/jpeg', 0.95);
+        const link = document.createElement('a');
+        link.href = jpegData;
+        link.download = `page-${currentPage}-hd.jpg`;
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+      }
+    } catch (error) {
+      console.error('Error exporting full image:', error);
     }
+    
+    setIsExporting(false);
   };
 
   return (
@@ -339,9 +418,10 @@ const PDFViewer = ({ file, onPrint, onDownloadFull }: PDFViewerProps) => {
                 size="sm"
                 onClick={handleDownloadCropped}
                 className="gap-2"
+                disabled={isExporting}
               >
-                <Download className="w-4 h-4" />
-                Cropped
+                {isExporting ? <Loader2 className="w-4 h-4 animate-spin" /> : <Download className="w-4 h-4" />}
+                Cropped HD
               </Button>
             </>
           )}
@@ -351,9 +431,10 @@ const PDFViewer = ({ file, onPrint, onDownloadFull }: PDFViewerProps) => {
             size="sm"
             onClick={handleDownloadFullImage}
             className="gap-2"
+            disabled={isExporting}
           >
-            <Download className="w-4 h-4" />
-            Full Image
+            {isExporting ? <Loader2 className="w-4 h-4 animate-spin" /> : <Download className="w-4 h-4" />}
+            Full Image HD
           </Button>
 
           <Button
