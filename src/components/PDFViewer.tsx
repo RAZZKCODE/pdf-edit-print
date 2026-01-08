@@ -227,14 +227,127 @@ const PDFViewer = ({ file, onPrint, onDownloadFull }: PDFViewerProps) => {
     return croppedCanvas.toDataURL('image/png', 1.0);
   }, [cropArea]);
 
-  const handlePrint = () => {
-    if (cropArea && cropArea.width > 10 && cropArea.height > 10) {
-      const imageData = extractCroppedImage();
-      onPrint(imageData, currentPage);
-    } else {
-      // Print full page
-      onPrint(null, currentPage);
+  const handlePrint = async () => {
+    setIsExporting(true);
+    
+    try {
+      let imageData: string | null = null;
+      
+      if (cropArea && cropArea.width > 10 && cropArea.height > 10) {
+        // Print cropped selection at high resolution
+        const highResCanvas = await renderHighResPage();
+        if (highResCanvas && pageRef.current) {
+          const pageRect = pageRef.current.getBoundingClientRect();
+          const displayCanvas = pageRef.current.querySelector('canvas');
+          
+          if (displayCanvas) {
+            const displayCanvasRect = displayCanvas.getBoundingClientRect();
+            const offsetX = displayCanvasRect.left - pageRect.left;
+            const offsetY = displayCanvasRect.top - pageRect.top;
+            const adjustedX = cropArea.x - offsetX;
+            const adjustedY = cropArea.y - offsetY;
+            const scaleX = highResCanvas.width / displayCanvasRect.width;
+            const scaleY = highResCanvas.height / displayCanvasRect.height;
+            
+            const sourceX = Math.max(0, adjustedX * scaleX);
+            const sourceY = Math.max(0, adjustedY * scaleY);
+            const sourceWidth = Math.min(cropArea.width * scaleX, highResCanvas.width - sourceX);
+            const sourceHeight = Math.min(cropArea.height * scaleY, highResCanvas.height - sourceY);
+            
+            if (sourceWidth > 0 && sourceHeight > 0) {
+              const croppedCanvas = document.createElement('canvas');
+              croppedCanvas.width = sourceWidth;
+              croppedCanvas.height = sourceHeight;
+              const ctx = croppedCanvas.getContext('2d');
+              
+              if (ctx) {
+                ctx.fillStyle = '#FFFFFF';
+                ctx.fillRect(0, 0, croppedCanvas.width, croppedCanvas.height);
+                ctx.drawImage(
+                  highResCanvas,
+                  sourceX, sourceY, sourceWidth, sourceHeight,
+                  0, 0, sourceWidth, sourceHeight
+                );
+                imageData = croppedCanvas.toDataURL('image/png', 1.0);
+              }
+            }
+          }
+        }
+      } else {
+        // Print full page at high resolution
+        const highResCanvas = await renderHighResPage();
+        if (highResCanvas) {
+          const printCanvas = document.createElement('canvas');
+          printCanvas.width = highResCanvas.width;
+          printCanvas.height = highResCanvas.height;
+          const ctx = printCanvas.getContext('2d');
+          
+          if (ctx) {
+            ctx.fillStyle = '#FFFFFF';
+            ctx.fillRect(0, 0, printCanvas.width, printCanvas.height);
+            ctx.drawImage(highResCanvas, 0, 0);
+            imageData = printCanvas.toDataURL('image/png', 1.0);
+          }
+        }
+      }
+      
+      if (imageData) {
+        // Open print window with only the image
+        const printWindow = window.open('', '_blank');
+        if (printWindow) {
+          printWindow.document.write(`
+            <!DOCTYPE html>
+            <html>
+              <head>
+                <title>Print PDF Page ${currentPage}</title>
+                <style>
+                  * { margin: 0; padding: 0; box-sizing: border-box; }
+                  @page { margin: 0; }
+                  body {
+                    display: flex;
+                    justify-content: center;
+                    align-items: center;
+                    min-height: 100vh;
+                    background: white;
+                  }
+                  img {
+                    max-width: 100%;
+                    max-height: 100vh;
+                    width: auto;
+                    height: auto;
+                    object-fit: contain;
+                  }
+                  @media print {
+                    body { padding: 0; }
+                    img {
+                      max-width: 100%;
+                      max-height: 100%;
+                      page-break-inside: avoid;
+                    }
+                  }
+                </style>
+              </head>
+              <body>
+                <img src="${imageData}" alt="PDF Page" />
+                <script>
+                  window.onload = function() {
+                    setTimeout(function() {
+                      window.print();
+                      window.close();
+                    }, 300);
+                  }
+                </script>
+              </body>
+            </html>
+          `);
+          printWindow.document.close();
+        }
+      }
+    } catch (error) {
+      console.error('Error printing:', error);
     }
+    
+    setIsExporting(false);
   };
 
   const handleDownloadCropped = async () => {
