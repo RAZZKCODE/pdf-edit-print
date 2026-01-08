@@ -302,23 +302,37 @@ const PDFViewer = ({ file, onPrint, onDownloadFull }: PDFViewerProps) => {
                 <title>Print PDF Page ${currentPage}</title>
                 <style>
                   * { margin: 0; padding: 0; box-sizing: border-box; }
-                  @page { margin: 0; }
+                  html, body {
+                    width: 100%;
+                    height: 100%;
+                    background: white;
+                  }
                   body {
                     display: flex;
                     justify-content: center;
                     align-items: center;
-                    min-height: 100vh;
-                    background: white;
                   }
                   img {
                     max-width: 100%;
-                    max-height: 100vh;
+                    max-height: 100%;
                     width: auto;
                     height: auto;
                     object-fit: contain;
                   }
+                  @page { 
+                    margin: 10mm;
+                    size: auto;
+                  }
                   @media print {
-                    body { padding: 0; }
+                    html, body {
+                      width: 100%;
+                      height: 100%;
+                    }
+                    body {
+                      display: flex;
+                      justify-content: center;
+                      align-items: center;
+                    }
                     img {
                       max-width: 100%;
                       max-height: 100%;
