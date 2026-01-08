@@ -34,8 +34,8 @@ interface PDFViewerProps {
   onDownloadFull: () => void;
 }
 
-// High resolution scale for downloads (3x for ~300 DPI)
-const DOWNLOAD_SCALE = 3;
+// High resolution scale for downloads (6x for 4K/600 DPI)
+const DOWNLOAD_SCALE = 6;
 
 const PDFViewer = ({ file, onPrint, onDownloadFull }: PDFViewerProps) => {
   const [numPages, setNumPages] = useState<number>(0);
@@ -296,10 +296,10 @@ const PDFViewer = ({ file, onPrint, onDownloadFull }: PDFViewerProps) => {
           0, 0, sourceWidth, sourceHeight
         );
         
-        const jpegData = croppedCanvas.toDataURL('image/jpeg', 0.95);
+        const pngData = croppedCanvas.toDataURL('image/png', 1.0);
         const link = document.createElement('a');
-        link.href = jpegData;
-        link.download = `cropped-page-${currentPage}-hd.jpg`;
+        link.href = pngData;
+        link.download = `cropped-page-${currentPage}-4k.png`;
         document.body.appendChild(link);
         link.click();
         document.body.removeChild(link);
@@ -332,10 +332,10 @@ const PDFViewer = ({ file, onPrint, onDownloadFull }: PDFViewerProps) => {
         ctx.fillRect(0, 0, jpegCanvas.width, jpegCanvas.height);
         ctx.drawImage(highResCanvas, 0, 0);
         
-        const jpegData = jpegCanvas.toDataURL('image/jpeg', 0.95);
+        const pngData = jpegCanvas.toDataURL('image/png', 1.0);
         const link = document.createElement('a');
-        link.href = jpegData;
-        link.download = `page-${currentPage}-hd.jpg`;
+        link.href = pngData;
+        link.download = `page-${currentPage}-4k.png`;
         document.body.appendChild(link);
         link.click();
         document.body.removeChild(link);
@@ -421,7 +421,7 @@ const PDFViewer = ({ file, onPrint, onDownloadFull }: PDFViewerProps) => {
                 disabled={isExporting}
               >
                 {isExporting ? <Loader2 className="w-4 h-4 animate-spin" /> : <Download className="w-4 h-4" />}
-                Cropped HD
+                Cropped 4K
               </Button>
             </>
           )}
@@ -434,7 +434,7 @@ const PDFViewer = ({ file, onPrint, onDownloadFull }: PDFViewerProps) => {
             disabled={isExporting}
           >
             {isExporting ? <Loader2 className="w-4 h-4 animate-spin" /> : <Download className="w-4 h-4" />}
-            Full Image HD
+            Full Image 4K
           </Button>
 
           <Button
