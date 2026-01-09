@@ -1,8 +1,6 @@
 import { useState, useRef, useCallback, useEffect } from "react";
 import { Document, Page, pdfjs } from "react-pdf";
 import { motion } from "framer-motion";
-import { PDFDocument } from 'pdf-lib'; // Import pdf-lib
-import { toast } from "sonner"; // Import toast for notifications
 import { 
   ChevronLeft, 
   ChevronRight, 
@@ -13,8 +11,7 @@ import {
   Maximize2,
   Download,
   X,
-  Loader2,
-  Unlock // Import Unlock icon
+  Loader2
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import PasswordModal from "@/components/PasswordModal";
@@ -50,24 +47,14 @@ const PDFViewer = ({ file, onPrint, onDownloadFull }: PDFViewerProps) => {
   const [startPos, setStartPos] = useState({ x: 0, y: 0 });
   const [showPasswordModal, setShowPasswordModal] = useState(false);
   const [passwordError, setPasswordError] = useState<string>("");
+  const [pdfKey, setPdfKey] = useState(0);
   const [isExporting, setIsExporting] = useState(false);
   const [pdfDocument, setPdfDocument] = useState<any>(null);
-  
-  // NEW: State for verified password and saving status
-  const [verifiedPassword, setVerifiedPassword] = useState<string>(""); 
-  const [isSaving, setIsSaving] = useState(false);
   
   const containerRef = useRef<HTMLDivElement>(null);
   const pageRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const passwordCallbackRef = useRef<((password: string) => void) | null>(null);
-
-  // Reset password when file changes
-  useEffect(() => {
-    setVerifiedPassword("");
-    setCurrentPage(1);
-    setCropArea(null);
-  }, [file]);
 
   const onDocumentLoadSuccess = (pdf: any) => {
     setNumPages(pdf.numPages);
@@ -77,15 +64,14 @@ const PDFViewer = ({ file, onPrint, onDownloadFull }: PDFViewerProps) => {
     passwordCallbackRef.current = null;
   };
 
-  // FIX #6: Add error handling to high-res render
+  // Render page at high resolution for download
   const renderHighResPage = async (): Promise<HTMLCanvasElement | null> => {
     if (!pdfDocument) return null;
     
     try {
       const page = await pdfDocument.getPage(currentPage);
-      if (!page) return null;
-      
       const viewport = page.getViewport({ scale: DOWNLOAD_SCALE });
+      
       const canvas = document.createElement('canvas');
       const context = canvas.getContext('2d');
       if (!context) return null;
@@ -101,19 +87,13 @@ const PDFViewer = ({ file, onPrint, onDownloadFull }: PDFViewerProps) => {
       return canvas;
     } catch (error) {
       console.error('Error rendering high-res page:', error);
-      toast("Render Error", {
-        description: "Failed to render page at high resolution"
-      });
       return null;
     }
   };
 
-  // FIX #1: Better password handling - no async state issue
   const handlePasswordSubmit = (enteredPassword: string) => {
     if (passwordCallbackRef.current) {
-      // Store password synchronously before callback
       passwordCallbackRef.current(enteredPassword);
-      setVerifiedPassword(enteredPassword); // After callback completes
       setShowPasswordModal(false);
     }
   };
@@ -156,10 +136,14 @@ const PDFViewer = ({ file, onPrint, onDownloadFull }: PDFViewerProps) => {
     const checkForCanvas = () => {
       if (pageRef.current) {
         const canvas = pageRef.current.querySelector('canvas');
-        if (canvas) canvasRef.current = canvas;
+        if (canvas) {
+          canvasRef.current = canvas;
+        }
       }
     };
-    checkForCanvas();
+    
+    const timer = setTimeout(checkForCanvas, 500);
+    return () => clearTimeout(timer);
   }, [currentPage, scale, file]);
 
   const handleMouseDown = useCallback((e: React.MouseEvent) => {
@@ -205,15 +189,19 @@ const PDFViewer = ({ file, onPrint, onDownloadFull }: PDFViewerProps) => {
     const pageRect = pageRef.current.getBoundingClientRect();
     const canvasRect = sourceCanvas.getBoundingClientRect();
 
+    // Calculate the offset of the canvas within the page container
     const offsetX = canvasRect.left - pageRect.left;
     const offsetY = canvasRect.top - pageRect.top;
 
+    // Adjust crop coordinates relative to the canvas
     const adjustedX = cropArea.x - offsetX;
     const adjustedY = cropArea.y - offsetY;
 
+    // Calculate the scale factor between displayed size and actual canvas size
     const scaleX = sourceCanvas.width / canvasRect.width;
     const scaleY = sourceCanvas.height / canvasRect.height;
 
+    // Apply scale to get actual pixel coordinates
     const sourceX = Math.max(0, adjustedX * scaleX);
     const sourceY = Math.max(0, adjustedY * scaleY);
     const sourceWidth = Math.min(cropArea.width * scaleX, sourceCanvas.width - sourceX);
@@ -221,6 +209,7 @@ const PDFViewer = ({ file, onPrint, onDownloadFull }: PDFViewerProps) => {
 
     if (sourceWidth <= 0 || sourceHeight <= 0) return null;
 
+    // Create a new canvas for the cropped image at full resolution
     const croppedCanvas = document.createElement('canvas');
     croppedCanvas.width = sourceWidth;
     croppedCanvas.height = sourceHeight;
@@ -228,6 +217,7 @@ const PDFViewer = ({ file, onPrint, onDownloadFull }: PDFViewerProps) => {
     
     if (!ctx) return null;
 
+    // Draw the cropped portion at full resolution
     ctx.drawImage(
       sourceCanvas,
       sourceX, sourceY, sourceWidth, sourceHeight,
@@ -239,10 +229,12 @@ const PDFViewer = ({ file, onPrint, onDownloadFull }: PDFViewerProps) => {
 
   const handlePrint = async () => {
     setIsExporting(true);
+    
     try {
       let imageData: string | null = null;
       
       if (cropArea && cropArea.width > 10 && cropArea.height > 10) {
+        // Print cropped selection at high resolution
         const highResCanvas = await renderHighResPage();
         if (highResCanvas && pageRef.current) {
           const pageRect = pageRef.current.getBoundingClientRect();
@@ -282,6 +274,7 @@ const PDFViewer = ({ file, onPrint, onDownloadFull }: PDFViewerProps) => {
           }
         }
       } else {
+        // Print full page at high resolution
         const highResCanvas = await renderHighResPage();
         if (highResCanvas) {
           const printCanvas = document.createElement('canvas');
@@ -299,6 +292,7 @@ const PDFViewer = ({ file, onPrint, onDownloadFull }: PDFViewerProps) => {
       }
       
       if (imageData) {
+        // Open print window with only the image
         const printWindow = window.open('', '_blank');
         if (printWindow) {
           printWindow.document.write(`
@@ -366,6 +360,7 @@ const PDFViewer = ({ file, onPrint, onDownloadFull }: PDFViewerProps) => {
     } catch (error) {
       console.error('Error printing:', error);
     }
+    
     setIsExporting(false);
   };
 
@@ -375,6 +370,7 @@ const PDFViewer = ({ file, onPrint, onDownloadFull }: PDFViewerProps) => {
     setIsExporting(true);
     
     try {
+      // Render at high resolution
       const highResCanvas = await renderHighResPage();
       if (!highResCanvas || !pageRef.current) {
         setIsExporting(false);
@@ -389,12 +385,16 @@ const PDFViewer = ({ file, onPrint, onDownloadFull }: PDFViewerProps) => {
       }
       
       const displayCanvasRect = displayCanvas.getBoundingClientRect();
+      
+      // Calculate the offset of display canvas within page container
       const offsetX = displayCanvasRect.left - pageRect.left;
       const offsetY = displayCanvasRect.top - pageRect.top;
       
+      // Adjust crop coordinates relative to display canvas
       const adjustedX = cropArea.x - offsetX;
       const adjustedY = cropArea.y - offsetY;
       
+      // Scale from display size to high-res canvas size
       const scaleX = highResCanvas.width / displayCanvasRect.width;
       const scaleY = highResCanvas.height / displayCanvasRect.height;
       
@@ -408,6 +408,7 @@ const PDFViewer = ({ file, onPrint, onDownloadFull }: PDFViewerProps) => {
         return;
       }
       
+      // Create cropped canvas at high resolution
       const croppedCanvas = document.createElement('canvas');
       croppedCanvas.width = sourceWidth;
       croppedCanvas.height = sourceHeight;
@@ -433,6 +434,7 @@ const PDFViewer = ({ file, onPrint, onDownloadFull }: PDFViewerProps) => {
     } catch (error) {
       console.error('Error exporting cropped image:', error);
     }
+    
     setIsExporting(false);
   };
 
@@ -446,6 +448,7 @@ const PDFViewer = ({ file, onPrint, onDownloadFull }: PDFViewerProps) => {
         return;
       }
       
+      // Create JPEG with white background
       const jpegCanvas = document.createElement('canvas');
       jpegCanvas.width = highResCanvas.width;
       jpegCanvas.height = highResCanvas.height;
@@ -467,62 +470,8 @@ const PDFViewer = ({ file, onPrint, onDownloadFull }: PDFViewerProps) => {
     } catch (error) {
       console.error('Error exporting full image:', error);
     }
+    
     setIsExporting(false);
-  };
-
-  // FIX #4: Better error handling with try-finally
-  const handleDownloadUnlocked = async () => {
-    try {
-      setIsSaving(true);
-      const arrayBuffer = await file.arrayBuffer();
-      
-      // Load PDF with verified password if available
-      const pdfDoc = await PDFDocument.load(arrayBuffer, { 
-        password: verifiedPassword || undefined 
-      });
-
-      // Save PDF (decrypted)
-      const pdfBytes = await pdfDoc.save();
-      const blob = new Blob([pdfBytes], { type: 'application/pdf' });
-      
-      let url: string | null = null;
-      try {
-        url = URL.createObjectURL(blob);
-        const link = document.createElement('a');
-        link.href = url;
-        link.download = `unlocked-${file.name}`;
-        document.body.appendChild(link);
-        link.click();
-        document.body.removeChild(link);
-        
-        toast("Success!", {
-          description: "PDF unlocked and downloaded successfully.",
-        });
-      } finally {
-        // FIX #5: Guaranteed cleanup
-        if (url) URL.revokeObjectURL(url);
-      }
-
-    } catch (error) {
-      console.error("Unlock/Download Error:", error);
-      
-      let errorMessage = "Failed to download PDF.";
-      if (error instanceof Error) {
-        if (error.message.includes("Password")) {
-          errorMessage = "Incorrect Password. Please ensure the file is unlocked.";
-        }
-      }
-      
-      toast("Download Failed", {
-        description: errorMessage,
-        action: {
-          label: "Try Again",
-          onClick: () => handleDownloadUnlocked()
-        }
-      });
-    } finally {
-      setIsSaving(false);
-    }
   };
 
   return (
@@ -614,18 +563,6 @@ const PDFViewer = ({ file, onPrint, onDownloadFull }: PDFViewerProps) => {
             {isExporting ? <Loader2 className="w-4 h-4 animate-spin" /> : <Download className="w-4 h-4" />}
             Full Image 4K
           </Button>
-          
-          {/* NEW: Unlocked PDF Download Button */}
-          <Button
-            variant="secondary"
-            size="sm"
-            onClick={handleDownloadUnlocked}
-            className="gap-2"
-            disabled={isSaving}
-          >
-            {isSaving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Unlock className="w-4 h-4" />}
-            Save Unlocked PDF
-          </Button>
 
           <Button
             variant="default"
@@ -676,6 +613,7 @@ const PDFViewer = ({ file, onPrint, onDownloadFull }: PDFViewerProps) => {
             {/* Crop Overlay */}
             {cropArea && cropArea.width > 0 && cropArea.height > 0 && (
               <>
+                {/* Dimmed overlay */}
                 <div 
                   className="absolute inset-0 bg-foreground/40 pointer-events-none"
                   style={{
@@ -693,6 +631,7 @@ const PDFViewer = ({ file, onPrint, onDownloadFull }: PDFViewerProps) => {
                     )`
                   }}
                 />
+                {/* Crop selection border */}
                 <div
                   className="absolute border-2 border-accent bg-accent/10 pointer-events-none"
                   style={{
@@ -709,6 +648,7 @@ const PDFViewer = ({ file, onPrint, onDownloadFull }: PDFViewerProps) => {
               </>
             )}
 
+            {/* Crop Mode Indicator */}
             {isCropMode && !cropArea && (
               <div className="absolute top-4 left-1/2 -translate-x-1/2 bg-accent text-accent-foreground px-4 py-2 rounded-full text-sm font-medium shadow-lg">
                 Click and drag to select area
@@ -718,6 +658,7 @@ const PDFViewer = ({ file, onPrint, onDownloadFull }: PDFViewerProps) => {
         </div>
       </div>
 
+      {/* Password Modal */}
       <PasswordModal
         isOpen={showPasswordModal}
         onSubmit={handlePasswordSubmit}
